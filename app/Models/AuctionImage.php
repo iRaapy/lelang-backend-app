@@ -11,6 +11,7 @@ class AuctionImage extends Model
         'path',
         'order',
     ];
+    protected $appends = ['url'];
 
     public function auction()
     {

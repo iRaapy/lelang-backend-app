@@ -53,11 +53,6 @@ class BidController extends Controller
 
             // Simpan siapa penawar tertinggi SEBELUM bid ini, untuk dikirim notifikasi outbid
            $previousHighestBid = $auction->highestBid()->first();
-
-\Log::info('DEBUG previousHighestBid', [
-    'previous_highest_bid' => $previousHighestBid?->toArray(),
-    'current_user' => $user->id,
-]);
             // Tandai semua bid sebelumnya sebagai outbid
             Bid::where('auction_id', $auction->id)
                 ->where('status', 'active')
@@ -131,27 +126,33 @@ class BidController extends Controller
     /**
      * Tutup lelang dan tetapkan pemenang (dipakai oleh Buy Now & Scheduler).
      */
-    public function closeAuction(Auction $auction, ?int $winnerId = null): void
-    {
-        DB::transaction(function () use ($auction, $winnerId) {
-            $auction = Auction::where('id', $auction->id)->lockForUpdate()->first();
+  public function closeAuction(Auction $auction, ?int $winnerId = null): void
+{
+    $closed = false;
+    $auctionToAnnounce = null;
 
-            if ($auction->status === 'ended') {
-                return;
-            }
+    DB::transaction(function () use ($auction, $winnerId, &$closed, &$auctionToAnnounce) {
+        $auction = Auction::where('id', $auction->id)->lockForUpdate()->first();
 
-            $winner = $winnerId
-                ? $winnerId
-                : $auction->highestBid()->first()?->bidder_id;
+        if ($auction->status === 'ended') {
+            return;
+        }
 
-            $auction->update([
-                'status' => 'ended',
-                'winner_id' => $winner,
-            ]);
+        $winner = $winnerId ?? $auction->highestBid()->first()?->bidder_id;
 
-            $auction->refresh();
+        $auction->update([
+            'status' => 'ended',
+            'winner_id' => $winner,
+        ]);
 
-            broadcast(new AuctionEnded($auction->load('winner')));
-        });
+        $auction->refresh();
+        $closed = true;
+        $auctionToAnnounce = $auction->load('winner');
+    });
+
+    // Broadcast DI LUAR transaction
+    if ($closed && $auctionToAnnounce) {
+        broadcast(new AuctionEnded($auctionToAnnounce));
     }
+}
 }
